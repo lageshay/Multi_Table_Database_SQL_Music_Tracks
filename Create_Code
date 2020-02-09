@@ -1,0 +1,133 @@
+#Import xml and sqlite3
+import xml.etree.ElementTree as ET
+import sqlite3
+
+#Creates the database file ‘trackdb.sqlite’ and makes a database connection
+conn = sqlite3.connect('trackdb.sqlite')
+cur = conn.cursor()
+
+# Make some fresh tables using executescript()
+#“Drops” or deletes the below tables if they already exist in the database
+cur.executescript('''
+DROP TABLE IF EXISTS Artist;
+DROP TABLE IF EXISTS Genre;
+DROP TABLE IF EXISTS Album;
+DROP TABLE IF EXISTS Track;
+
+#Creates a new “Artist” table with columns for (artist) id and name
+#The id/primary key will be created and autoincremented as it finds unique artists
+CREATE TABLE Artist (
+    id  INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
+    name    TEXT UNIQUE
+);
+
+#Creates a new “Genre” table with columns for (genre) id and name
+#The id/primary key will be created and autoincremented as it finds unique genres
+CREATE TABLE Genre (
+    id  INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
+    name   TEXT UNIQUE
+);
+
+#Creates a new “Album” table with columns: (album) id, title, and the artist_id
+#The id/primary key will be created and autoincremented as it finds unique albums
+CREATE TABLE Album (
+    id  INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
+    artist_id  INTEGER,
+    title   TEXT UNIQUE
+);
+
+#Creates a new “Track” table with columns for (track) id, title, album_id, 
+#genre_id, length, rating, and count
+#The id/primary key will be created and autoincremented as it finds unique tracks
+CREATE TABLE Track (
+    id  INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT UNIQUE,
+    title TEXT  UNIQUE,
+    album_id  INTEGER,
+    genre_id  INTEGER,
+    len INTEGER, rating INTEGER, count INTEGER
+);
+''')
+
+#Prompt the user to give a file name and default to ‘Library.xml’ if left blank
+fname = input('Enter file name: ')
+if ( len(fname) < 1 ) : fname = 'Library.xml'
+
+#Data in the xml file looks like the following 3 lines:
+#<key>Track ID</key><integer>369</integer>
+#<key>Name</key><string>Another One Bites The Dust</string>
+#<key>Artist</key><string>Queen</string>
+
+#Dictionary/mappings lookup 
+def lookup(d, key):
+    found = False
+    #Loop through the children in the outer dictionary
+    for child in d:
+        if found : return child.text
+        #Find the child tag that has a particular key (‘key’)
+        if child.tag == 'key' and child.text == key :
+            found = True
+    return None
+
+#Parse fname (the give file name) 	
+stuff = ET.parse(fname)
+#Find all of the third level dictionaries 
+all = stuff.findall('dict/dict/dict')
+print('Dict count:', len(all))
+#Iterate through all the third level dictionaries found above
+#Skip/Continue if there is no track id
+for entry in all:
+    if ( lookup(entry, 'Track ID') is None ) : continue
+
+    #Lookup all of the below keys
+    name = lookup(entry, 'Name')
+    artist = lookup(entry, 'Artist')
+    album = lookup(entry, 'Album')
+    genre = lookup(entry, 'Genre')
+    count = lookup(entry, 'Play Count')
+    rating = lookup(entry, 'Rating')
+    length = lookup(entry, 'Total Time')
+
+    #Debugging- If name, genre, artist, or album is missing, skip/continue
+    if name is None or genre is None or artist is None or album is None :
+        continue
+
+    #Print all the found/requested variables
+    #Helps if need to debug to see where the program errored/stopped
+    print(name, artist, album, count, rating, length)
+
+    #Puts in a new row in the Artist table when reaches a unique/new artist
+    #Otherwise it “ignores”/does not put in a new row
+    #Puts in the “artist” variable and gets the id/primary key
+    cur.execute('''INSERT OR IGNORE INTO Artist (name)
+        VALUES ( ? )''', ( artist, ) )
+    cur.execute('SELECT id FROM Artist WHERE name = ? ', (artist, ))
+    artist_id = cur.fetchone()[0]
+
+    #Puts in a new row in the Genre table when reaches a unique/new genre
+    #Otherwise it “ignores”/does not put in a new row
+    #Puts in the “genre” variable and gets the id/primary key
+    cur.execute('''INSERT OR IGNORE INTO Genre (name)
+        VALUES ( ? )''', ( genre, ) )
+    cur.execute('SELECT id FROM Genre WHERE name = ? ', (genre, ))
+    genre_id = cur.fetchone()[0]
+
+    #Puts in a new row in the Album table when reaches a unique/new album
+    #Otherwise it “ignores”/does not put in a new row
+    #Puts in the “album” variable, artist_id (foreign key to Artist table) and 
+    #gets the id/primary key
+    cur.execute('''INSERT OR IGNORE INTO Album (title, artist_id)
+        VALUES ( ?, ? )''', ( album, artist_id ) )
+    cur.execute('SELECT id FROM Album WHERE title = ? ', (album, ))
+    album_id = cur.fetchone()[0]
+
+    #Puts in a new row in the Track table when reaches a unique/new track
+    #Otherwise it “replaces”/acts as a “update”
+    #Puts in the track “title” variable, album_id, genre_id, length, 
+    #rating, and count
+    cur.execute('''INSERT OR REPLACE INTO Track
+        (title, album_id, genre_id, len, rating, count)
+        VALUES ( ?, ?, ?, ?, ?, ? )''',
+        ( name, album_id, genre_id, length, rating, count ) )
+
+    #Commit- write to memory
+    conn.commit()
